@@ -1,0 +1,880 @@
+Program.Sub.ScreenSU.Start
+Gui.FormLines..Create
+Gui.FormLines..Caption("Edit Line Dates")
+Gui.FormLines..Size(15360,7635)
+Gui.FormLines..MinX(0)
+Gui.FormLines..MinY(0)
+Gui.FormLines..Position(0,0)
+Gui.FormLines..BackColor(-2147483633)
+Gui.FormLines..MaxButton(False)
+Gui.FormLines..MousePointer(0)
+Gui.FormLines..Event(UnLoad,FormLines_UnLoad)
+Gui.FormLines.frameHeader.Create(Frame)
+Gui.FormLines.frameHeader.Size(15030,660)
+Gui.FormLines.frameHeader.Position(60,45)
+Gui.FormLines.frameHeader.Anchor(13)
+Gui.FormLines.dtpShip.Create(DatePicker)
+Gui.FormLines.dtpShip.Size(1710,285)
+Gui.FormLines.dtpShip.Position(1755,195)
+Gui.FormLines.dtpShip.Parent("frameHeader")
+Gui.FormLines.dtpShip.Event(Change,dtpShip_Change)
+Gui.FormLines.lblShip.Create(Label,"New Ship Date",True,1215,255,0,465,285,True,0,"Arial",8,-2147483633,0)
+Gui.FormLines.lblShip.Parent("frameHeader")
+Gui.FormLines.dtpDeliver.Create(DatePicker)
+Gui.FormLines.dtpDeliver.Size(1665,285)
+Gui.FormLines.dtpDeliver.Position(5595,210)
+Gui.FormLines.dtpDeliver.Parent("frameHeader")
+Gui.FormLines.dtpDeliver.Event(Change,dtpDeliver_Change)
+Gui.FormLines.lblDelivery.Create(Label,"New Delivery Date",True,1560,255,0,3990,285,True,0,"Arial",8,-2147483633,0)
+Gui.FormLines.lblDelivery.Parent("frameHeader")
+Gui.FormLines.lblAll.Create(Label,"Apply to All",True,1050,255,0,11820,285,True,0,"Arial",8,-2147483633,0)
+Gui.FormLines.lblAll.Parent("frameHeader")
+Gui.FormLines.lblAll.Anchor(1)
+Gui.FormLines.lblAll.FontStyle(False,False,True,False,False)
+Gui.FormLines.lblAll.ForeColor(16711680)
+Gui.FormLines.lblAll.Event(Click,lblAll_Click)
+Gui.FormLines.lblFiltered.Create(Label,"Apply to Filtered",True,1305,255,0,10170,285,True,0,"Arial",8,-2147483633,0)
+Gui.FormLines.lblFiltered.Parent("frameHeader")
+Gui.FormLines.lblFiltered.Anchor(1)
+Gui.FormLines.lblFiltered.FontStyle(False,False,True,False,False)
+Gui.FormLines.lblFiltered.ForeColor(16711680)
+Gui.FormLines.lblFiltered.Event(Click,lblFiltered_Click)
+Gui.FormLines.lblSelected.Create(Label,"Apply to Selected",True,1410,255,0,8310,285,True,0,"Arial",8,-2147483633,0)
+Gui.FormLines.lblSelected.Parent("frameHeader")
+Gui.FormLines.lblSelected.Anchor(1)
+Gui.FormLines.lblSelected.FontStyle(False,False,True,False,False)
+Gui.FormLines.lblSelected.ForeColor(16711680)
+Gui.FormLines.lblSelected.Event(Click,lblSelected_Click)
+Gui.FormLines.ggcLines.Create(GsGridControl)
+Gui.FormLines.ggcLines.Size(14985,6195)
+Gui.FormLines.ggcLines.Position(90,795)
+Gui.FormLines.ggcLines.Anchor(15)
+Gui.FormLines.ggcLines.Event(ColumnFilterChanged,gridFilter_changed)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+v.Global.sFilter.Declare
+v.Global.dShip.Declare
+v.Global.dDeliver.Declare
+v.Global.bLines.Declare(Boolean,False)
+v.Global.bDeliver.Declare
+v.Global.bShip.Declare
+v.Global.sType.Declare
+v.Global.sFrom.Declare
+v.Global.sTo.Declare
+
+Program.External.Include.Library("7020.lib")
+Program.Sub.Preflight.End
+
+'BUTTON 1 11910  / vars 000203 unpadded 
+'BUTTON 2 11920  / vars 000203 unpadded
+'POPULATE 11560 / Vars 000201 / 000202
+
+'need to get the type of the order, if it's a transfer order, get the locations from the header and add those values to the line items.
+'000065 = from location
+'000077 = order type
+'000174 = to location
+'000075 = price class discount (need this to determine the price of the part being uploaded)
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sOrder.Declare
+
+
+
+f.Intrinsic.Control.SelectCase(v.Caller.Hook)
+	'order entry form is opened
+	f.Intrinsic.Control.Case("11560")
+		v.Passed.000201.Set("Line Upload")
+		v.Passed.000202.Set("Chng Dates")
+		f.Intrinsic.Control.callsub(form_unload)
+	'order entry script 1 button is pressed
+	f.Intrinsic.Control.Case("11910")
+		f.Intrinsic.Control.If(v.Passed.000077.Trim,=,"Transfer")
+			v.Global.sType.Set(v.Passed.000077.Trim)
+			v.Global.sFrom.Set(v.Passed.000065)
+			v.Global.sTo.Set(v.Passed.000174)
+		f.Intrinsic.Control.EndIf
+		f.Intrinsic.String.LPad(v.Passed.000203,"0",7,v.Local.sOrder)
+		f.Intrinsic.Control.CallSub(load_lines_file,"ORDER",V.Local.sOrder)
+	'order entry script 2 button is pressed
+	f.Intrinsic.Control.Case("11920")
+		f.Intrinsic.Control.CallSub(begin_open_lines)
+f.Intrinsic.Control.EndSelect
+
+f.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.load_lines_file.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+v.Local.sOrder.Declare
+v.Local.iRet.Declare
+v.Local.sFile.Declare
+
+
+'open connection
+f.ODBC.Connection!coredb.opencompanyconnection
+'pad the sales order number
+f.Intrinsic.String.LPad(v.Passed.000003,"0",7,v.Local.sOrder)
+'build a query to see if the order has been saved already
+f.Intrinsic.String.Build("select count(order_no) from v_order_header where order_no = '{0}'",v.Local.sOrder,v.Local.sSql)
+f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.iRet)
+
+'we have an order header
+f.Intrinsic.Control.If(v.Local.iRet,>,0)
+	f.Intrinsic.UI.ShowOpenFileDialog("","*.xlsx",524288,v.Local.sFile)
+
+	f.Intrinsic.Control.If(v.Local.sFile,<>,v.Ambient.cancel)
+		f.Intrinsic.Control.CallSub(load_lines,"FILE",V.Local.sFile,"ORDER",v.Local.sOrder)
+		'close the connection
+		F.ODBC.Connection!coredb.Close
+	f.Intrinsic.Control.EndIf
+	f.Intrinsic.UI.Msgbox("Complete!")
+
+F.Intrinsic.Control.Else
+	'we don't have an order header
+	F.Intrinsic.UI.Msgbox("Order Header must be saved first","Upload Error")
+f.Intrinsic.Control.EndIf
+
+'exit the program
+f.Intrinsic.Control.CallSub(form_unload)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.load_lines_file.End
+
+'must_dlvr_by_date - DELIVERY DATE
+'date_item_prom - SHIP DATE
+Program.Sub.begin_open_lines.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+v.Local.sOrder.Declare
+v.Local.iRet.Declare
+
+'open connection
+f.ODBC.Connection!coredb.opencompanyconnection
+'pad the sales order number
+f.Intrinsic.String.LPad(v.Passed.000003,"0",7,v.Local.sOrder)
+'build a query to see if the order has been saved already
+f.Intrinsic.String.Build("select count(order_no) from v_order_lines where order_no = '{0}'",v.Local.sOrder,v.Local.sSql)
+f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.iRet)
+
+'if iRet is greater than 0, the order has been saved - ultimately we should only have a return of 1 or 0.
+f.Intrinsic.Control.If(v.Local.iRet,>,0)
+	'build query statement
+	f.Intrinsic.String.Build("select order_no, record_no, part, description, qty_ordered, date_item_prom, must_dlvr_by_date, user_3, user_4 from v_order_lines where order_no = '{0}'",V.Local.sOrder,v.Local.sSql)
+	'create our datatable from the query
+	f.Data.DataTable.CreateFromSQL("dtLines","coredb",v.Local.sSql,True)
+	'done with the connection for now
+	F.ODBC.Connection!coredb.Close
+	'format grid
+	f.Intrinsic.Control.CallSub(format_grid)
+	'display the form
+	gui.FormLines..Show
+f.Intrinsic.Control.Else
+	F.Intrinsic.UI.Msgbox("Order Header must be saved first","Upload Error")
+	f.Intrinsic.Control.CallSub(form_unload)
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.begin_open_lines.End
+
+Program.Sub.Catching.Start
+v.Local.sError.declare(string)
+F.Intrinsic.String.Build("Project: {0}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}","GCG_5288_SO_AddLines.g2u",V.Ambient.NewLine,v.Args.sub,V.Args.errorno,V.args.errordesc,V.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+f.Intrinsic.Control.CallSub(form_unload)
+Program.Sub.Catching.End
+
+Program.Sub.format_grid.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+
+'create the dataview and the gridview
+f.Data.DataView.Create("dtLines","dvLines",22)
+gui.FormLines.ggcLines.DataSource("dtLines")
+gui.FormLines.ggcLines.AddGridviewFromDataview("gvLines","dtLines","dvLines")
+
+
+'ORDER_NO
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","Visible",False)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","AllowEdit",False)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","HeaderHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","CellHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","Caption","ORDER_NO")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","ORDER_NO","MinWidth","50")
+'RECORD_NO
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","Visible",False)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","AllowEdit",False)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","HeaderHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","CellHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","Caption","RECORD_NO")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","RECORD_NO","MinWidth","50")
+'PART
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","HeaderHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","CellHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","Caption","PART")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","MinWidth","50")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","PART","VisibleIndex","0")
+'DESCRIPTION
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","HeaderHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","CellHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","Caption","DESCRIPTION")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","MinWidth","150")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DESCRIPTION","VisibleIndex","1")
+'QTY_ORDERED
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","HeaderHAlignment","Far")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","CellHAlignment","Far")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","DisplayCustomNumeric","#,###.00")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","Caption","QTY_ORDERED")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","MinWidth","35")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","QTY_ORDERED","VisibleIndex","2")
+'DATE_ITEM_PROM
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","ReadOnly",False)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","HeaderHAlignment","Center")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","CellHAlignment","Center")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","DisplayCustomDateTime","d")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","Caption","SHIP DATE")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","MinWidth","40")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","DATE_ITEM_PROM","VisibleIndex","3")
+'MUST_DLVR_BY_DATE
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","ReadOnly",False)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","HeaderHAlignment","Center")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","CellHAlignment","Center")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","DisplayCustomDateTime","d")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","Caption","DELIVERY DATE")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","MinWidth","40")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","MUST_DLVR_BY_DATE","VisibleIndex","4")
+'USER_3
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","HeaderHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","CellHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","Caption","TAG")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","MinWidth","50")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_3","VisibleIndex","5")
+'USER_4
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","HeaderFontBold",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","Visible",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","AllowEdit",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","ReadOnly",True)
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","HeaderHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","CellHAlignment","Near")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","Caption","DELIVERY GROUP")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","MinWidth","50")
+gui.FormLines.ggcLines.SetColumnProperty("gvLines","USER_4","VisibleIndex","6")
+'gridview properties
+gui.FormLines.ggcLines.SetGridviewProperty("gvLines","MultiSelect",True)
+gui.FormLines.ggcLines.SetGridviewProperty("gvLines","AllowColumnResizing",True)
+gui.FormLines.ggcLines.SetGridviewProperty("gvLines","AllowColumnMoving",True)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.format_grid.End
+
+Program.Sub.dtpShip_Change.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+
+v.Global.dShip.Set(v.Screen.FormLines!dtpShip.text)
+v.Global.bShip.Set(True)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.dtpShip_Change.End
+
+Program.Sub.dtpDeliver_Change.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+
+v.Global.dDeliver.Set(v.Screen.FormLines!dtpDeliver.text)
+v.Global.bDeliver.Set(True)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.dtpDeliver_Change.End
+
+'for all 3 label clicks we need to see if the global variables for delivery and ship have been changed.  Then set values accordingly.
+Program.Sub.lblAll_Click.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+v.Local.sTemp.Declare
+V.Local.iCount.Declare
+V.Local.sDate.Declare
+v.Local.sDate2.Declare
+
+f.Intrinsic.Control.If(v.Global.bDeliver,=,True,"OR",V.Global.bShip,=,True)
+
+	f.ODBC.Connection!coredb.opencompanyconnection
+	
+	F.Intrinsic.Control.For(v.Local.iCount,0,v.DataTable.dtLines.RowCount--,1)
+		f.Intrinsic.String.Build("UPDATE ORDER_LINES SET FIELD1, FIELD2 WHERE ORDER_NO = '{0}' AND RECORD_NO = '{1}'",v.DataTable.dtLines(v.Local.iCount).ORDER_NO!FIELDVALSTRING,V.DataTable.dtLines(V.Local.iCount).RECORD_NO!FIELDVALSTRING,V.Local.sSql)
+		'are we updating the ship date
+		f.Intrinsic.Control.If(v.Global.bShip)
+			f.Data.DataTable.SetValue("dtLines",-1,"DATE_ITEM_PROM",v.Global.dShip)
+			f.Intrinsic.String.Format(v.DataTable.dtLines(v.Local.iCount).DATE_ITEM_PROM!FIELDVALSTRING,"YYYYMMDD",V.Local.sDate)
+			f.Intrinsic.String.Format(v.DataTable.dtLines(v.Local.iCount).DATE_ITEM_PROM!FIELDVALSTRING,"MMDDYY",V.Local.sDate2)
+			F.Intrinsic.String.Build("DATE_ITEM_PROM = '{0}', ITEM_PROMISE_DT = '{1}'",V.Local.sDate,V.Local.sDate2,V.Local.sTemp)
+			F.Intrinsic.String.Replace(V.Local.sSql,"FIELD1",V.Local.sTemp,V.Local.sSql)
+		F.Intrinsic.Control.Else
+			'if FIELD1 is not included in the query, replace the comma as well as FIELD1
+			F.Intrinsic.String.Replace(v.Local.sSql,"FIELD1,","",V.Local.sSql)
+		f.Intrinsic.Control.EndIf
+		'are we updating the delivery date
+		f.Intrinsic.Control.If(v.Global.bDeliver)
+			f.Data.DataTable.SetValue("dtLines",-1,"MUST_DLVR_BY_DATE",v.Global.dDeliver)
+			f.Intrinsic.String.Format(v.DataTable.dtLines(v.Local.iCount).MUST_DLVR_BY_DATE!FIELDVALSTRING,"YYYYMMDD",V.Local.sDate)
+			F.Intrinsic.String.Build("MUST_DLVR_BY_DATE = '{0}'",V.Local.sDate,V.Local.sTemp)
+			F.Intrinsic.String.Replace(V.Local.sSql,"FIELD2",V.Local.sTemp,V.Local.sSql)
+		F.Intrinsic.Control.Else
+			'if FIELD2 is not included in the query, replace the comma as well as FIELD2
+			F.Intrinsic.String.Replace(V.Local.sSql,", FIELD2","",V.Local.sSql)
+		f.Intrinsic.Control.EndIf
+		
+		f.ODBC.Connection!coredb.execute(v.Local.sSql)
+		
+	f.Intrinsic.Control.Next(v.Local.iCount)
+	
+	f.Intrinsic.Control.CallSub(refresh_lines)
+	
+	f.Intrinsic.Control.CallSub(update_order_to_wo)
+	
+	F.ODBC.Connection!coredb.close
+	
+	f.Intrinsic.UI.Msgbox("Complete!","Update Line Dates")
+
+f.Intrinsic.Control.Else
+	f.Intrinsic.UI.Msgbox("Update 'New Ship Date' or 'New Delivery Date' before processing","Validation Error")
+f.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.lblAll_Click.End
+
+Program.Sub.lblFiltered_Click.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+v.Local.sTemp.Declare
+V.Local.iCount.Declare
+V.Local.sDate.Declare
+v.Local.sDate2.Declare
+
+f.Intrinsic.Control.If(v.Global.bDeliver,=,True,"OR",V.Global.bShip,=,True)
+
+	f.ODBC.Connection!coredb.opencompanyconnection
+	F.Intrinsic.Control.If(V.DataView.dtLines!dvLineUpdate.Exists)
+		F.Data.DataView.SetFilter("dtLines","dvLineUpdate",V.Global.sFilter)
+	F.Intrinsic.Control.Else
+		f.Data.DataView.Create("dtLines","dvLineUpdate",22,v.Global.sFilter,"")
+	f.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.For(v.Local.iCount,0,v.DataView.dtLines!dvLineUpdate.RowCount--,1)
+		f.Intrinsic.String.Build("UPDATE ORDER_LINES SET FIELD1, FIELD2 WHERE ORDER_NO = '{0}' AND RECORD_NO = '{1}'",v.DataView.dtLines!dvLineUpdate(v.Local.iCount).ORDER_NO!FIELDVALSTRING,v.DataView.dtLines!dvLineUpdate(V.Local.iCount).RECORD_NO!FIELDVALSTRING,V.Local.sSql)
+		'are we updating the ship date
+		f.Intrinsic.Control.If(v.Global.bShip)
+			f.Data.DataView.SetValue("dtLines","dvLineUpdate",-1,"DATE_ITEM_PROM",v.Global.dShip)
+			f.Intrinsic.String.Format(v.DataView.dtLines!dvLineUpdate(v.Local.iCount).DATE_ITEM_PROM!FIELDVALSTRING,"YYYYMMDD",V.Local.sDate)
+			f.Intrinsic.String.Format(v.DataView.dtLines!dvLineUpdate(v.Local.iCount).DATE_ITEM_PROM!FIELDVALSTRING,"MMDDYY",V.Local.sDate2)
+			F.Intrinsic.String.Build("DATE_ITEM_PROM = '{0}', ITEM_PROMISE_DT = '{1}'",V.Local.sDate,V.Local.sDate2,V.Local.sTemp)
+			F.Intrinsic.String.Replace(V.Local.sSql,"FIELD1",V.Local.sTemp,V.Local.sSql)
+		F.Intrinsic.Control.Else
+			'if FIELD1 is not included in the query, replace the comma as well as FIELD1
+			F.Intrinsic.String.Replace(v.Local.sSql,"FIELD1,","",V.Local.sSql)
+		f.Intrinsic.Control.EndIf
+		'are we updating the delivery date
+		f.Intrinsic.Control.If(v.Global.bDeliver)
+			f.Data.DataView.SetValue("dtLines","dvLineUpdate",-1,"MUST_DLVR_BY_DATE",v.Global.dDeliver)
+			f.Intrinsic.String.Format(v.DataView.dtLines!dvLineUpdate(v.Local.iCount).MUST_DLVR_BY_DATE!FIELDVALSTRING,"YYYYMMDD",V.Local.sDate)
+			F.Intrinsic.String.Build("MUST_DLVR_BY_DATE = '{0}'",V.Local.sDate,V.Local.sTemp)
+			F.Intrinsic.String.Replace(V.Local.sSql,"FIELD2",V.Local.sTemp,V.Local.sSql)
+		F.Intrinsic.Control.Else
+			'if FIELD2 is not included in the query, replace the comma as well as FIELD2
+			F.Intrinsic.String.Replace(V.Local.sSql,", FIELD2","",V.Local.sSql)
+		f.Intrinsic.Control.EndIf
+		
+		f.ODBC.Connection!coredb.execute(v.Local.sSql)
+		
+	f.Intrinsic.Control.Next(v.Local.iCount)
+	
+	f.Intrinsic.Control.CallSub(refresh_lines)
+	
+	f.Intrinsic.Control.CallSub(update_order_to_wo)
+	
+	F.ODBC.Connection!coredb.close
+	
+	f.Intrinsic.UI.Msgbox("Complete!","Update Line Dates")
+f.Intrinsic.Control.Else
+	f.Intrinsic.UI.Msgbox("Update 'New Ship Date' or 'New Delivery Date' before processing","Validation Error")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.lblFiltered_Click.End
+
+Program.Sub.lblSelected_Click.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+v.Local.sTemp.Declare
+V.Local.iCount.Declare
+V.Local.sDate.Declare
+V.Local.sDate2.Declare
+v.Local.sSelected.Declare
+v.Local.iRowIndex.Declare
+
+
+gui.FormLines.ggcLines.GetSelectedRows("gvLines",v.Local.sSelected)
+
+f.Intrinsic.String.Split(v.Local.sSelected,"*!*",v.Local.sSelected)
+
+f.Intrinsic.Control.If(v.Local.sSelected.IsNullOrWhiteSpace,=,False)
+	
+	f.Intrinsic.Control.If(v.Global.bDeliver,=,True,"OR",V.Global.bShip,=,True)
+		f.ODBC.Connection!coredb.opencompanyconnection
+		
+		F.Intrinsic.Control.For(v.Local.iCount,0,v.Local.sSelected.UBound,1)
+			v.Local.iRowIndex.Set(v.Local.sSelected(v.Local.iCount))
+			f.Intrinsic.String.Build("UPDATE ORDER_LINES SET FIELD1, FIELD2 WHERE ORDER_NO = '{0}' AND RECORD_NO = '{1}'",v.DataTable.dtLines(v.Local.iRowIndex).ORDER_NO!FIELDVALSTRING,V.DataTable.dtLines(v.Local.iRowIndex).RECORD_NO!FIELDVALSTRING,V.Local.sSql)
+			'are we updating the ship date
+			f.Intrinsic.Control.If(v.Global.bShip)
+				f.Data.DataTable.SetValue("dtLines",v.Local.iRowIndex,"DATE_ITEM_PROM",v.Global.dShip)
+				f.Intrinsic.String.Format(v.DataTable.dtLines(v.Local.iRowIndex).DATE_ITEM_PROM!FIELDVALSTRING,"YYYYMMDD",V.Local.sDate)
+				f.Intrinsic.String.Format(v.DataTable.dtLines(v.Local.iRowIndex).DATE_ITEM_PROM!FIELDVALSTRING,"MMDDYY",V.Local.sDate2)
+				F.Intrinsic.String.Build("DATE_ITEM_PROM = '{0}', ITEM_PROMISE_DT = '{1}'",V.Local.sDate,V.Local.sDate2,V.Local.sTemp)
+				F.Intrinsic.String.Replace(V.Local.sSql,"FIELD1",V.Local.sTemp,V.Local.sSql)
+			F.Intrinsic.Control.Else
+				'if FIELD1 is not included in the query, replace the comma as well as FIELD1
+				F.Intrinsic.String.Replace(v.Local.sSql,"FIELD1,","",V.Local.sSql)
+			f.Intrinsic.Control.EndIf
+			'are we updating the delivery date
+			f.Intrinsic.Control.If(v.Global.bDeliver)
+				f.Data.DataTable.SetValue("dtLines",v.Local.iRowIndex,"MUST_DLVR_BY_DATE",v.Global.dDeliver)
+				f.Intrinsic.String.Format(v.DataTable.dtLines(v.Local.iRowIndex).MUST_DLVR_BY_DATE!FIELDVALSTRING,"YYYYMMDD",V.Local.sDate)
+				F.Intrinsic.String.Build("MUST_DLVR_BY_DATE = '{0}'",V.Local.sDate,V.Local.sTemp)
+				F.Intrinsic.String.Replace(V.Local.sSql,"FIELD2",V.Local.sTemp,V.Local.sSql)
+			F.Intrinsic.Control.Else
+				'if FIELD2 is not included in the query, replace the comma as well as FIELD2
+				F.Intrinsic.String.Replace(V.Local.sSql,", FIELD2","",V.Local.sSql)
+			f.Intrinsic.Control.EndIf
+			
+			f.ODBC.Connection!coredb.execute(v.Local.sSql)
+			
+		f.Intrinsic.Control.Next(v.Local.iCount)
+	
+		f.Intrinsic.Control.CallSub(refresh_lines)
+		
+		f.Intrinsic.Control.CallSub(update_order_to_wo)
+		
+		F.ODBC.Connection!coredb.close
+		
+		f.Intrinsic.UI.Msgbox("Complete!","Update Line Dates")
+	f.Intrinsic.Control.Else
+		f.Intrinsic.UI.Msgbox("Update 'New Ship Date' or 'New Delivery Date' before processing","Validation Error")
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Else
+	f.Intrinsic.UI.Msgbox("No Lines Selected !","Update Error")
+f.Intrinsic.Control.EndIf
+
+
+
+
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.lblSelected_Click.End
+
+Program.Sub.FormLines_Drop.Start
+Program.Sub.FormLines_Drop.End
+
+Program.Sub.FormLines_UnLoad.Start
+f.Intrinsic.Control.CallSub(form_unload)
+Program.Sub.FormLines_UnLoad.End
+
+Program.Sub.form_unload.Start
+f.Intrinsic.Control.End
+Program.Sub.form_unload.End
+
+Program.Sub.gridFilter_changed.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+
+v.Global.sFilter.Set(v.Args.ACTIVEFILTEREXPRESSION)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.gridFilter_changed.End
+
+'000006 customer number
+'000068 order discount (.XXXX)
+'000081 discount all (Y/N)
+'000075 cust class
+Program.Sub.load_lines.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.bExcel.Declare
+v.Local.sFile.Declare
+v.Local.sSheets.Declare
+v.Local.sLines.Declare
+v.Local.sFrags.Declare
+v.Local.sSql.Declare
+'iCount - which spreadsheet row are we on
+v.Local.iCount.Declare
+'iData - which row in the datatable are we on
+V.Local.iData.Declare(Long,0)
+'iLine - which sales order line number are we adding (sOrdLine is the padded version = '001')
+v.Local.iLine.Declare
+v.Local.sOrdLine.Declare
+V.Local.sQty.Declare
+
+v.Local.iRet.Declare
+v.Local.sDIP.Declare
+v.Local.sMDBD.Declare
+V.Local.sIPD.Declare
+v.Local.bExists.Declare
+v.Local.sMsg.Declare
+v.Local.dShip.Declare
+v.Local.dDelivery.Declare
+
+
+F.Intrinsic.UI.InvokeWaitDialog("Parsing file")
+'check to see if Excel is installed
+f.Automation.MSExcel.CheckPresence(v.Local.bExcel)
+
+f.Intrinsic.Control.If(v.Local.bExcel)
+
+	f.Automation.MSExcel.ReadSpreadsheet(v.Args.FILE,v.Local.sFile)
+	f.Intrinsic.String.Split(v.Local.sFile,"&^&",v.Local.sSheets)
+	
+	'ORDADLN doesn't support dates
+	'for this project we are adding the dates to a separate table so we can update the line dates after they have been loaded by ORADLN
+	f.Data.DataTable.Create("dtLineDates",True)
+	f.Data.DataTable.AddColumn("dtLineDates","ORDERNO","STRING","",7)
+	F.Data.DataTable.AddColumn("dtLineDates","LINE","STRING","",3)
+	F.Data.DataTable.AddColumn("dtLineDates","SHIPDATE","DATE")
+	F.Data.DataTable.AddColumn("dtLineDates","DELIVERY","DATE")
+	
+	'if this is a transfer type oder, we're going to add a few more columns to address after the upload.
+	f.Intrinsic.Control.if(v.Global.sType,=,"Transfer")
+		f.Data.DataTable.AddColumn("dtLineDates","TRNSFR_LOCN","STRING",V.Global.sTo,3)
+		F.Data.DataTable.AddColumn("dtLineDates","FLAG_COGS","STRING","N",1)
+		F.Data.DataTable.AddColumn("dtLineDates","FLAG_PURCHASED","STRING","N",1)
+		F.Data.DataTable.AddColumn("dtLineDates","INFO1","STRING","",30)
+		F.Data.DataTable.AddColumn("dtLineDates","INFO2","STRING","",30)
+		F.Data.DataTable.AddColumn("dtLineDates","FLAG_LOT","STRING","",1)
+	f.Intrinsic.Control.EndIf
+	'date_item_prom
+	'must_dlvr_by_date
+	
+	f.Intrinsic.String.Split(v.Local.sSheets(0),"$!$",v.Local.sLines)
+	
+	'see if there are any lines already on this sales order
+	f.Intrinsic.Control.CallSub(check_lines,"ORDER",V.Args.ORDER)
+	v.Local.iLine.Set(v.Args.LINE)
+	
+	f.Intrinsic.Control.For(v.Local.iCount,0,v.Local.sLines.UBound,1)
+		f.Intrinsic.UI.ChangeWaitStatus("Building records for upload....",v.Local.iCount,0,v.Local.sLines.UBound)
+		F.Intrinsic.String.Split(V.Local.sLines(v.Local.iCount),"*!*",V.Local.sFrags)
+		f.Intrinsic.Control.If(v.Local.iCount,>,0)
+			f.Intrinsic.String.LPad(v.Local.iLine,"0",3,v.Local.sOrdLine)
+			f.Intrinsic.Math.Mult(v.Local.sFrags(1),10000,v.Local.iRet)
+			f.Intrinsic.String.LPad(v.Local.iRet,"0",13,v.Local.sQty)
+			'get additional information for the part we're going to add
+			f.Intrinsic.Control.CallSub(get_part_info,"PART",V.Local.sFrags(0),"LOCATION",V.Passed.000065,"QTY",v.Local.sFrags(1))
+
+			
+			f.Intrinsic.String.Format(v.Local.sFrags(2),"MM/DD/YYYY",V.Local.dShip)
+			F.Intrinsic.String.Format(V.Local.sFrags(3),"MM/DD/YYYY",V.Local.dDelivery)
+			
+			F.Data.DataTable.AddRow("ORDADLN","RECTYPE","O","CUSTOMER",V.Passed.000006,"ORDERNO",V.Args.ORDER,"PART",v.Local.sFrags(0),"LOCATION",V.Passed.000065,"LINENO",V.Local.sOrdLine,"PRODUCTLINE",V.Args.PL,"DESCRIPTION",V.Args.DESCR,"QTYORDER",V.Local.sQty,"QUOTEDPRICE",V.Args.PRICE,"USER3",V.Local.sFrags(4),"USER4",V.Local.sFrags(5),"UofM",V.Args.UM,"COST",V.Args.COST)
+
+			F.Intrinsic.Control.If(V.Global.sType,<>,"Transfer")
+				F.Data.DataTable.AddRow("dtLineDates","ORDERNO",v.Args.ORDER,"LINE",V.Local.sOrdLine,"SHIPDATE",V.Local.dShip,"DELIVERY",V.Local.dDelivery)
+			f.Intrinsic.Control.Else
+				f.Data.DataTable.AddRow("dtLineDates","ORDERNO",v.Args.ORDER,"LINE",V.Local.sOrdLine,"SHIPDATE",V.Local.dShip,"DELIVERY",V.Local.dDelivery,"INFO1",V.Args.INFO1,"INFO2",V.Args.INFO2,"FLAG_LOT",V.Args.LOT)
+			f.Intrinsic.Control.EndIf
+'			'increment the row number in the datatable
+'			f.Intrinsic.Math.Add(v.Local.iData,1,v.Local.iData)
+			'increment the line number for the sales order
+			f.Intrinsic.Math.Add(v.Local.iLine,1,v.Local.iLine)
+		f.Intrinsic.Control.EndIf
+		
+	f.Intrinsic.Control.Next(v.Local.iCount)
+	
+	f.Intrinsic.UI.ChangeWaitStatus("Uploading lines.....")
+	'call the lib file to process the upload
+	f.Intrinsic.Control.CallSub(7020Sync,"ORDER",V.Args.ORDER)
+
+	'date_item_prom
+	'must_dlvr_by_date
+	f.Intrinsic.UI.ChangeWaitStatus("Validating lines and cleaning up......")
+	'update dates for uploaded line items.
+	'if this is a transfer order we're going to update a few more values to the line items.
+	f.Intrinsic.Control.For(v.Local.iCount,0,v.DataTable.dtLineDates.RowCount--,1)
+		f.Intrinsic.String.Format(v.DataTable.dtLineDates(v.Local.iCount).SHIPDATE!FIELDVAL,"YYYYMMDD",V.Local.sDIP)
+		f.Intrinsic.String.Format(v.DataTable.dtLineDates(v.Local.iCount).SHIPDATE!FIELDVAL,"MMDDYY",V.Local.sIPD)
+		F.Intrinsic.String.Format(V.DataTable.dtLineDates(V.Local.iCount).DELIVERY!FIELDVAL,"YYYYMMDD",V.Local.sMDBD)
+		F.Intrinsic.Control.If(V.Global.sType,<>,"Transfer")
+			f.Intrinsic.String.Build("UPDATE ORDER_LINES SET DATE_ITEM_PROM = '{0}', MUST_DLVR_BY_DATE = '{1}', ITEM_PROMISE_DT = '{2}' WHERE ORDER_NO = '{3}' AND LEFT(RECORD_NO,3) = '{4}'",V.Local.sDIP,V.Local.sMDBD,V.Local.sIPD,V.DataTable.dtLineDates(V.Local.iCount).ORDERNO!FIELDVALSTRING,V.DataTable.dtLineDates(V.Local.iCount).LINE!FIELDVALSTRING,V.Local.sSql)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("UPDATE ORDER_LINES SET DATE_ITEM_PROM = '{0}', MUST_DLVR_BY_DATE = '{1}', ITEM_PROMISE_DT = '{2}', INFO_1 = '{3}', INFO_2 = '{4}', FLAG_PURCHASED = '{5}', FLAG_COGS = '{6}', LOTBIN_FLG = '{7}', TRNSFR_LOCN = '{8}'  WHERE ORDER_NO = '{9}' AND LEFT(RECORD_NO,3) = '{10}'",V.Local.sDIP,V.Local.sMDBD,V.Local.sIPD,V.DataTable.dtLineDates(V.Local.iCount).ORDERNO!FIELDVALSTRING,V.DataTable.dtLineDates(V.Local.iCount).LINE!FIELDVALSTRING,V.DataTable.dtLineDates(V.Local.iCount).INFO1!FIELDVALTRIM,V.DataTable.dtLineDates(V.Local.iCount).INFO2!FIELDVALTRIM,V.DataTable.dtLineDates(V.Local.iCount).FLAG_PURCHASED!FIELDVALTRIM,V.DataTable.dtLineDates(V.Local.iCount).FLAG_COGS!FIELDVALTRIM,V.DataTable.dtLineDates(V.Local.iCount).FLAG_LOT!FIELDVALTRIM,V.DataTable.dtLineDates(V.Local.iCount).TRNSFR_LOCN!FIELDVALTRIM,V.Local.sSql)
+		f.Intrinsic.Control.EndIf
+		F.ODBC.Connection!COREDB.Execute(v.Local.sSql)
+	f.Intrinsic.Control.Next(v.Local.iCount)
+	
+f.Intrinsic.Control.Else
+	f.Intrinsic.UI.Msgbox("Excel is not installed, can't read workbook","Missing Component")
+	f.Intrinsic.Control.CallSub(form_unload)
+f.Intrinsic.Control.EndIf
+
+f.Intrinsic.UI.CloseWaitDialog
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.load_lines.End
+
+Program.Sub.check_lines.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+v.Local.sRet.Declare
+v.Local.iLine.Declare
+
+'build query, exclude freight lines '8000'
+f.Intrinsic.String.Build("select max(record_no) from v_order_lines where order_no = '{0}' and record_no <> '8000'",v.Args.ORDER,v.Local.sSql)
+f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+
+'evaluate the return to determine if we are appending to existing lines
+f.Intrinsic.Control.If(v.Local.sRet.IsNullOrWhiteSpace)
+	v.Global.bLines.Set(False)
+f.Intrinsic.Control.Else
+	v.global.bLines.Set(True)
+	'drop the trailing zero because we don't want it in the upload
+	f.Intrinsic.Math.Div(v.Local.sRet,10,v.Local.iLine)
+f.Intrinsic.Control.EndIf
+
+'add 1 to the line number so we have our starting value regardless if lines already exist
+F.Intrinsic.Math.Add(V.Local.iLine,1,V.Local.iLine)
+f.Intrinsic.Variable.AddRV("LINE",v.Local.iLine)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.check_lines.End
+
+Program.Sub.get_part_info.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+V.Local.sSql.Declare
+V.Local.sRet.Declare
+v.Local.iRet.Declare
+v.Local.fPrice.Declare
+v.Local.iPrice.Declare
+v.Local.sPrice.Declare
+v.Local.fDiscount.Declare
+v.Local.fCost.Declare
+v.Local.iCost.Declare
+v.Local.sCost.Declare
+v.Local.bRet.Declare
+V.Local.iCount.Declare
+
+f.Intrinsic.String.Build("select IM.PRODUCT_LINE, IM.DESCRIPTION, IM.AMT_PRICE, IM.AMT_COST, IM.UM_INVENTORY, IM.FLAG_LOT, I2.TEXT_INFO1, I2.TEXT_INFO2 from V_INVENTORY_MSTR IM LEFT JOIN V_INVENTORY_MST2 I2 ON IM.PART = I2.PART AND IM.LOCATION = I2.LOCATION where IM.PART = '{0}' AND IM.LOCATION = '{1}'",V.Args.PART,v.Args.LOCATION,V.Local.sSql)
+F.ODBC.Connection!coredb.openlocalrecordsetRO("rst",v.Local.sSql)
+f.Intrinsic.Control.If(v.ODBC.coredb!rst.EOF,=,False)
+	f.Intrinsic.Variable.AddRV("PL",V.ODBC.coredb!rst.FieldValTrim!PRODUCT_LINE)
+	f.Intrinsic.Variable.AddRV("DESCR",V.ODBC.coredb!rst.FieldValTrim!DESCRIPTION)
+	F.Intrinsic.Variable.AddRV("INFO1",V.ODBC.coredb!rst.FieldValTrim!TEXT_INFO1)
+	F.Intrinsic.Variable.AddRV("INFO2",V.ODBC.coredb!rst.FieldValTrim!TEXT_INFO2)
+	F.Intrinsic.Variable.AddRV("LOT",V.ODBC.coredb!rst.FieldValTrim!FLAG_LOT)
+	v.Local.fPrice.Set(V.ODBC.coredb!rst.FieldValFloat!AMT_PRICE)
+	v.Local.fCost.Set(V.ODBC.coredb!rst.FieldValFloat!AMT_COST)
+	F.Intrinsic.Variable.AddRV("UM",V.ODBC.coredb!rst.FieldValTrim!UM_INVENTORY)
+f.Intrinsic.Control.Else
+	f.Intrinsic.Variable.AddRV("PL","FG")
+	F.Intrinsic.Variable.AddRV("DESCR","------")
+	F.Intrinsic.Variable.AddRV("UM","EA")
+f.Intrinsic.Control.EndIf
+F.ODBC.coredb!rst.Close
+
+
+'v_oe_c_part_p_brk
+'v_oe_c_part_price
+'v_inv_alt_code
+'v_inv_alt_price
+
+'000075 = price class
+'000067 = price class discount
+'000081 = apply discounts to all lines
+'000068 = discount amount
+'000006 = customer
+
+'checking to see if this is using a customer price class
+f.Intrinsic.Control.If(v.Passed.000075,<>,"")
+	f.Intrinsic.String.Build("select KEYFLD from V_INV_ALT_CODE where CODE = '{0}'",v.Passed.000075,v.Local.sSql)
+	f.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.iRet)
+	f.Intrinsic.String.Build("select ALT_PRICE_{0} FROM V_INV_ALT_PRICE where PART = '{1}' AND LOCN = '{2}'",V.Local.iRet,V.Args.PART,V.Args.LOCATION,V.Local.sSql)
+	F.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.fPrice)
+f.Intrinsic.Control.Else
+	'check and see if the customer has a contract price
+	f.Intrinsic.String.Build("select pricing_method, price from v_oe_c_part_price where customer = '{0}' and part = '{1}' and location = '{2}'",v.Passed.000006.Trim,v.Args.PART,v.Args.LOCATION,V.Local.sSql)
+	F.ODBC.Connection!coredb.executeandreturn(v.Local.sSql,v.Local.sRet)
+	f.Intrinsic.String.IsInString(v.Local.sRet,"*!*",false,v.Local.bRet)
+	f.Intrinsic.Control.If(v.Local.bRet)
+		f.Intrinsic.String.Split(v.Local.sRet,"*!*",v.Local.sRet)
+		f.Intrinsic.Control.If(v.Local.sRet(0),=,"FF")
+			'if it's FF this means there are no quantity breaks so the price we have right now will work.
+			v.Local.fPrice.Set(v.Local.sRet(1))
+		F.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Elseif(v.Local.sRet,=,"")
+		'if its's QB this means we have to dig a little deeper.
+		f.Intrinsic.String.Build("select QB_QTY_1 AS QTY, PRICE_1 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_1 > 0 UNION ALL select QB_QTY_2 AS QTY, PRICE_2 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_2 > 0 UNION ALL select QB_QTY_3 AS QTY, PRICE_3 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_3 > 0 UNION ALL select QB_QTY_4 AS QTY, PRICE_4 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_4 > 0 UNION ALL select QB_QTY_5 AS QTY, PRICE_5 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_5 > 0 UNION ALL select QB_QTY_6 AS QTY, PRICE_6 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_6 > 0 UNION ALL select QB_QTY_7 AS QTY, PRICE_7 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_7 > 0 UNION ALL select QB_QTY_8 AS QTY, PRICE_8 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_8 > 0 UNION ALL select QB_QTY_9 AS QTY, PRICE_9 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_9 > 0 UNION ALL select QB_QTY_10 AS QTY, PRICE_10 AS PRICE FROM V_OE_C_PART_P_BRK where customer = '{0}' and part = '{1}' and location = '{2}' AND PRICE_10 > 0",v.Passed.000006.Trim,v.Args.part,v.Args.LOCATION,V.Local.sSql)
+		
+		F.Intrinsic.Control.If(V.DataTable.PRICES.Exists)
+			F.Data.DataTable.Close("PRICES")
+		F.Intrinsic.Control.EndIf
+		
+		F.Data.DataTable.CreateFromSQL("PRICES","COREDB",V.Local.sSql,True)
+		
+		F.Intrinsic.Control.For(V.Local.iCount,0,v.DataTable.PRICES.RowCount--,1)
+			F.Intrinsic.Control.If(V.Args.QTY,<=,V.DataTable.PRICES(V.Local.iCount).QTY!FIELDVAL)
+				V.Local.fPrice.Set(V.DataTable.PRICES(V.Local.iCount).PRICE!FIELDVALFLOAT)
+				F.Intrinsic.Control.ExitFor(V.Local.iCount)
+			F.Intrinsic.Control.ElseIf(V.Local.iCount,=,V.DataTable.PRICES.RowCount--)
+				V.Local.fPrice.Set(V.DataTable.PRICES(V.Local.iCount).PRICE!FIELDVALFLOAT)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iCount)
+		
+	f.Intrinsic.Control.EndIf
+	'checking to see if discounts are being applied
+'	f.Intrinsic.Control.If(v.Passed.000081,=,"Y",AND,V.Passed.000068,>,0)
+'		'apply the discount amount to the price.
+'		f.Intrinsic.Math.Mult(v.Local.fPrice,v.Passed.000068,v.Local.fDiscount)
+'		f.Intrinsic.Math.Sub(v.Local.fPrice,v.Local.fDiscount,v.Local.fPrice)
+'	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.EndIf
+
+'format the price
+f.Intrinsic.Math.Round(v.Local.fPrice,6,v.Local.fPrice)
+f.Intrinsic.Math.Mult(v.Local.fPrice,1000000,v.Local.iPrice)
+f.Intrinsic.String.LPad(v.Local.iPrice,"0",16,v.Local.sPrice)
+'format the cost
+f.Intrinsic.Math.Round(v.Local.fCost,6,v.Local.fCost)
+f.Intrinsic.Math.Mult(v.Local.fCost,1000000,v.Local.iCost)
+f.Intrinsic.String.LPad(v.Local.iCost,"0",16,v.Local.sCost)
+'add the return variable for price and cost
+f.Intrinsic.Variable.AddRV("PRICE",V.Local.sPrice)
+f.Intrinsic.Variable.AddRV("COST",v.Local.sCost)
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.get_part_info.End
+
+Program.Sub.refresh_lines.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+
+'build query statement
+f.Intrinsic.String.Build("select order_no, record_no, part, description, qty_ordered, date_item_prom, must_dlvr_by_date, user_3, user_4 from v_order_lines where order_no = '{0}'",v.DataTable.dtLines(0).ORDER_NO!FIELDVALSTRING,v.Local.sSql)
+
+f.Data.DataTable.DeleteRow("dtLines")
+f.Data.DataTable.AcceptChanges("dtLines")
+'create our datatable from the query
+f.Data.DataTable.CreateFromSQL("dtTemp","coredb",v.Local.sSql,True)
+f.Data.DataTable.Merge("dtTemp","dtLines",False,2)
+f.Data.DataTable.Close("dtTemp")
+
+	
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.refresh_lines.End
+
+Program.Sub.update_order_to_wo.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.sSql.Declare
+
+'update the date_order_due value in the order_to_wo table.
+f.Intrinsic.String.Build("UPDATE ORDER_TO_WO SET ORDER_TO_WO.DATE_ORDER_DUE = ORDER_LINES.DATE_ITEM_PROM FROM ORDER_TO_WO INNER JOIN ORDER_LINES ON ORDER_TO_WO.ORDER_NO = ORDER_LINES.ORDER_NO AND ORDER_TO_WO.ORDER_LINE = ORDER_LINES.RECORD_NO WHERE ORDER_LINES.ORDER_NO = '{0}'",v.DataTable.dtLines(0).ORDER_NO!FIELDVALSTRING,v.Local.sSql)
+
+F.ODBC.Connection!coredb.execute(v.Local.sSql)
+
+'now we have to update
+
+F.Intrinsic.Control.ExitSub
+
+f.Intrinsic.Control.catch
+f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.update_order_to_wo.End
